@@ -437,7 +437,7 @@ namespace DeviceExplorer
         {
             try
             {
-                filterDevicesTextBox.Clear();
+                searchDevicesTextBox.Clear();
                 await updateDevicesGridView();
                 devicesListed = true;
                 listDevicesButton.Text = "Refresh";
@@ -1137,13 +1137,13 @@ namespace DeviceExplorer
             showDevicePropertiesToolStripMenuItem.Enabled = (devicesGridView.SelectedRows.Count == 1);
         }
 
-        #region Device Filtering
-        private void filterDevicesTextBox_TextChanged(object sender, EventArgs e)
+        #region Device Searching
+        private void searchDevicesTextBox_TextChanged(object sender, EventArgs e)
         {
-            displayDevicesMatchingFilter();
+            displayDevicesMatchingSearch();
         }
 
-        private async Task displayDevicesMatchingFilter() { await displayDevicesMatchingFilter(filterDevicesTextBox.Text); }
+        private async Task displayDevicesMatchingSearch() { await displayDevicesMatchingSearch(searchDevicesTextBox.Text); }
 
         /// <summary>
         /// Filter the devices present in the list down by the provided filter text.
@@ -1152,7 +1152,7 @@ namespace DeviceExplorer
         /// hub, even those that weren't returned by GetDevices(), and thus are not 
         /// in the list.
         /// </summary>
-        private async Task displayDevicesMatchingFilter(string filterText)
+        private async Task displayDevicesMatchingSearch(string filterText)
         {
             if (filterText.Length == 0 || !IsValidRegex(filterText))
             {

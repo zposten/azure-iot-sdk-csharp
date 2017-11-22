@@ -57,7 +57,7 @@
             this.updateDeviceButton = new System.Windows.Forms.Button();
             this.deleteDeviceButton = new System.Windows.Forms.Button();
             this.groupBox2 = new System.Windows.Forms.GroupBox();
-            this.filterDevicesTextBox = new System.Windows.Forms.TextBox();
+            this.searchDevicesTextBox = new System.Windows.Forms.TextBox();
             this.filterDevicesLabel = new System.Windows.Forms.Label();
             this.deviceCountLabel = new System.Windows.Forms.Label();
             this.totalLabel = new System.Windows.Forms.Label();
@@ -484,7 +484,7 @@
             this.groupBox2.Anchor = ((System.Windows.Forms.AnchorStyles)((((System.Windows.Forms.AnchorStyles.Top | System.Windows.Forms.AnchorStyles.Bottom) 
             | System.Windows.Forms.AnchorStyles.Left) 
             | System.Windows.Forms.AnchorStyles.Right)));
-            this.groupBox2.Controls.Add(this.filterDevicesTextBox);
+            this.groupBox2.Controls.Add(this.searchDevicesTextBox);
             this.groupBox2.Controls.Add(this.filterDevicesLabel);
             this.groupBox2.Controls.Add(this.deviceCountLabel);
             this.groupBox2.Controls.Add(this.totalLabel);
@@ -498,11 +498,11 @@
             // 
             // filterDevicesTextBox
             // 
-            this.filterDevicesTextBox.Location = new System.Drawing.Point(58, 49);
-            this.filterDevicesTextBox.Name = "filterDevicesTextBox";
-            this.filterDevicesTextBox.Size = new System.Drawing.Size(676, 22);
-            this.filterDevicesTextBox.TabIndex = 14;
-            this.filterDevicesTextBox.TextChanged += new System.EventHandler(this.filterDevicesTextBox_TextChanged);
+            this.searchDevicesTextBox.Location = new System.Drawing.Point(58, 49);
+            this.searchDevicesTextBox.Name = "searchDevicesTextBox";
+            this.searchDevicesTextBox.Size = new System.Drawing.Size(676, 22);
+            this.searchDevicesTextBox.TabIndex = 14;
+            this.searchDevicesTextBox.TextChanged += new System.EventHandler(this.searchDevicesTextBox_TextChanged);
             // 
             // filterDevicesLabel
             // 
@@ -1417,7 +1417,7 @@
         private System.Windows.Forms.DataGridView messageSystemPropertiesGrid;
         private System.Windows.Forms.DataGridViewTextBoxColumn dataGridViewTextBoxColumn1;
         private System.Windows.Forms.DataGridViewTextBoxColumn dataGridViewTextBoxColumn2;
-        private System.Windows.Forms.TextBox filterDevicesTextBox;
+        private System.Windows.Forms.TextBox searchDevicesTextBox;
         private System.Windows.Forms.Label filterDevicesLabel;
     }
 }
