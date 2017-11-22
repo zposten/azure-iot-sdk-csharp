@@ -1,8 +1,10 @@
 ﻿using Microsoft.Azure.Devices;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Azure.Devices.Shared;
 
 namespace DeviceExplorer
 {
@@ -13,6 +15,19 @@ namespace DeviceExplorer
         private String iotHubConnectionString;
         private int maxCountOfDevices;
         private String protocolGatewayHostName;
+
+        private string hostName;
+        public string HostName
+        {
+            get
+            {
+                if (hostName == null)
+                {
+                    hostName = ExtractHostNameFromIotHubConnectionString(iotHubConnectionString);
+                }
+                return hostName;
+            }
+        }
 
         public DevicesProcessor(string iotHubConnenctionString, int devicesCount, string protocolGatewayName)
         {
@@ -25,80 +40,48 @@ namespace DeviceExplorer
 
         public async Task<List<DeviceEntity>> GetDevices()
         {
-            try
+            listOfDevices.Clear();
+            IEnumerable<Device> devices = await registryManager.GetDevicesAsync(maxCountOfDevices);
+            if (devices == null) return listOfDevices;
+
+            foreach (Device device in devices)
             {
-                DeviceEntity deviceEntity;
-                var devices = await registryManager.GetDevicesAsync(maxCountOfDevices);
-
-                if (devices != null)
-                {
-                    foreach (var device in devices)
-                    {
-                        deviceEntity = new DeviceEntity()
-                        {
-                            Id = device.Id,
-                            ConnectionState = device.ConnectionState.ToString(),
-                            ConnectionString = CreateDeviceConnectionString(device),
-                            LastActivityTime = device.LastActivityTime,
-                            LastConnectionStateUpdatedTime = device.ConnectionStateUpdatedTime,
-                            LastStateUpdatedTime = device.StatusUpdatedTime,
-                            MessageCount = device.CloudToDeviceMessageCount,
-                            State = device.Status.ToString(),
-                            SuspensionReason = device.StatusReason
-                        };
-
-                        if (device.Authentication != null)
-                        {
-
-                            deviceEntity.PrimaryKey = device.Authentication.SymmetricKey?.PrimaryKey;
-                            deviceEntity.SecondaryKey = device.Authentication.SymmetricKey?.SecondaryKey;
-                            deviceEntity.PrimaryThumbPrint = device.Authentication.X509Thumbprint?.PrimaryThumbprint;
-                            deviceEntity.SecondaryThumbPrint = device.Authentication.X509Thumbprint?.SecondaryThumbprint;
-
-                            //if ((device.Authentication.SymmetricKey != null) &&
-                            //    !((device.Authentication.SymmetricKey.PrimaryKey == null) ||
-                            //      (device.Authentication.SymmetricKey.SecondaryKey == null)))
-                            //{
-                            //    deviceEntity.PrimaryKey = device.Authentication.SymmetricKey.PrimaryKey;
-                            //    deviceEntity.SecondaryKey = device.Authentication.SymmetricKey.SecondaryKey;
-                            //    deviceEntity.PrimaryThumbPrint = "";
-                            //    deviceEntity.SecondaryThumbPrint = "";
-                            //}
-                            //else
-                            //{
-                            //    deviceEntity.PrimaryKey = "";
-                            //    deviceEntity.SecondaryKey = "";
-                            //    deviceEntity.PrimaryThumbPrint = device.Authentication.X509Thumbprint.PrimaryThumbprint;
-                            //    deviceEntity.SecondaryThumbPrint = device.Authentication.X509Thumbprint.SecondaryThumbprint;
-                            //}
-                        }
-
-                        listOfDevices.Add(deviceEntity);
-                    }
-                }
+                DeviceEntity deviceEntity = MapDeviceToDeviceEntity(device);
+                listOfDevices.Add(deviceEntity);
             }
-            catch (Exception ex)
-            {
-                throw ex;
-            }
+
             return listOfDevices;
+        }
+
+        public async Task<DeviceEntity> GetDeviceById(string deviceId)
+        {
+            Device device = await registryManager.GetDeviceAsync(deviceId);
+            return MapDeviceToDeviceEntity(device);
+        }
+
+        private DeviceEntity MapDeviceToDeviceEntity(Device device)
+        {
+            return new DeviceEntity
+            {
+                Id = device.Id,
+                PrimaryKey           = device.Authentication?.SymmetricKey.PrimaryKey,
+                SecondaryKey         = device.Authentication?.SymmetricKey.SecondaryKey,
+                PrimaryThumbPrint    = device.Authentication?.X509Thumbprint?.PrimaryThumbprint,
+                SecondaryThumbPrint  = device.Authentication?.X509Thumbprint?.SecondaryThumbprint,
+                ConnectionState      = device.ConnectionState.ToString(),
+                ConnectionString     = CreateDeviceConnectionString(device),
+                LastActivityTime     = device.LastActivityTime,
+                LastStateUpdatedTime = device.StatusUpdatedTime,
+                MessageCount         = device.CloudToDeviceMessageCount,
+                State                = device.Status.ToString(),
+                SuspensionReason     = device.StatusReason,
+                LastConnectionStateUpdatedTime = device.ConnectionStateUpdatedTime,
+            };
         }
 
         private String CreateDeviceConnectionString(Device device)
         {
             StringBuilder deviceConnectionString = new StringBuilder();
-
-            var hostName = String.Empty;
-            var tokenArray = iotHubConnectionString.Split(';');
-            for (int i = 0; i < tokenArray.Length; i++)
-            {
-                var keyValueArray = tokenArray[i].Split('=');
-                if (keyValueArray[0] == "HostName")
-                {
-                    hostName =  tokenArray[i] + ';';
-                    break;
-                }
-            }
 
             if (!String.IsNullOrWhiteSpace(hostName))
             {
@@ -125,6 +108,27 @@ namespace DeviceExplorer
             
             return deviceConnectionString.ToString();
         }
+
+
+        private static string ExtractHostNameFromIotHubConnectionString(string iotHubConnectionString)
+        {
+            string hostName = String.Empty;
+            string[] tokenArray = iotHubConnectionString.Split(';');
+
+            foreach (string t in tokenArray) {
+                string[] keyValueArray = t.Split('=');
+                if (keyValueArray[0] == "HostName")
+                {
+                    hostName = t + ';';
+                    return hostName;
+                }
+            }
+
+            return null;
+        }
+
+
+
         // For testing without connecting to a live service
         static public List<DeviceEntity> GetDevicesForTest()
         {

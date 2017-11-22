@@ -26,7 +26,7 @@ namespace DeviceExplorer
     {
         #region fields
         private const int MAX_TTL_VALUE = 365;
-        private const int MAX_COUNT_OF_DEVICES = 1000;
+        private const int MAX_COUNT_OF_DEVICES = 100000;
 
         private bool devicesListed = false;
         private static int eventHubPartitionsCount;
@@ -55,6 +55,7 @@ namespace DeviceExplorer
         private static DataGridViewRow messageSysPropContentEncoding = new DataGridViewRow();
 
         private SortableBindingList<DeviceEntity> allDevices;
+        private DevicesProcessor devicesProcessor;
 
         private string deviceIDSearchPattern = String.Empty;
         private DateTime deviceIDSearchPatternLastUpdateTime = DateTime.Now;
@@ -341,7 +342,11 @@ namespace DeviceExplorer
         #region ManagementTab
         private async Task updateDevicesGridView()
         {
-            var devicesProcessor = new DevicesProcessor(activeIoTHubConnectionString, MAX_COUNT_OF_DEVICES, protocolGatewayHost.Text);
+            devicesProcessor = new DevicesProcessor(activeIoTHubConnectionString, MAX_COUNT_OF_DEVICES, protocolGatewayHost.Text);
+
+            // Note that this method is not guaranteed to return all the devices, merely 
+            // an "approximation" of them.  It appears to generally top out at around 1000,
+            // regardless of how high the max count is.
             var devicesList = await devicesProcessor.GetDevices();
             devicesList.Sort();
             allDevices = new SortableBindingList<DeviceEntity>(devicesList);
@@ -397,6 +402,7 @@ namespace DeviceExplorer
         {
             try
             {
+                filterDevicesTextBox.Clear();
                 await updateDevicesGridView();
                 devicesListed = true;
                 listDevicesButton.Text = "Refresh";
@@ -1102,9 +1108,26 @@ namespace DeviceExplorer
             FilterDevices();
         }
 
-        private void FilterDevices() { FilterDevices(filterDevicesTextBox.Text); }
-        private void FilterDevices(string filterText)
+        private async Task FilterDevices() { await filterDevices(filterDevicesTextBox.Text); }
+
+        /// <summary>
+        /// Filter the devices present in the list down by the provided filter text.
+        /// 
+        /// This method also checks that filter text against all device IDs in the IoT
+        /// hub, even those that weren't returned by GetDevices(), and thus are not 
+        /// in the list.
+        /// </summary>
+        private async Task filterDevices(string filterText)
         {
+            DeviceEntity deviceFoundFromFilterText = await searchEntireIotHubByDeviceId(filterText);
+            if (deviceFoundFromFilterText != null)
+            {
+                devicesGridView.DataSource = 
+                    new SortableBindingList<DeviceEntity>(
+                        new[] { deviceFoundFromFilterText });
+                return;
+            };
+
             if (!IsValidRegex(filterText))
             {
                 devicesGridView.DataSource = allDevices;
@@ -1119,6 +1142,29 @@ namespace DeviceExplorer
             devicesGridView.DataSource = new SortableBindingList<DeviceEntity>(filteredDevices);
         }
 
+        /// <summary>
+        /// This method goes through the entire IoT hub (not just the devices returned
+        /// by GetDevices() that are currently in the list) and searches for a device 
+        /// by its Id.
+        /// </summary>
+        /// <returns>The device if it exists, otherwise null</returns>
+        private async Task<DeviceEntity> searchEntireIotHubByDeviceId(string deviceId)
+        {
+            try
+            {
+                return await devicesProcessor.GetDeviceById(deviceId);
+            }
+            catch (Exception)
+            {
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Determine if some field of a particular device matches the provided
+        /// filter text.
+        /// </summary>
+        /// <returns>True if it matches, false otherwise</returns>
         private static bool DeviceMatchesFilterText(DeviceEntity device, string filterText)
         {
             return new[]
@@ -1132,6 +1178,9 @@ namespace DeviceExplorer
             }.Any(s => StringMatchesFilterText(s, filterText));
         }
 
+        /// <summary>
+        /// Determines if a particular string matches the provided filter text.
+        /// </summary>
         private static bool StringMatchesFilterText(string s, string filterText)
         {
             if (string.IsNullOrWhiteSpace(s))          return false;
@@ -1141,12 +1190,17 @@ namespace DeviceExplorer
             return r.Match(s).Success;
         }
 
+        /// <summary>
+        /// Determines if a string is a valid regular expression.
+        /// </summary>
         private static bool IsValidRegex(string pattern)
         {
             if (string.IsNullOrWhiteSpace(pattern)) return false;
 
             try
             {
+                // I feel as though there should be a more efficient way to 
+                // handle this
                 Regex.Match("", pattern);
             }
             catch (ArgumentException)
