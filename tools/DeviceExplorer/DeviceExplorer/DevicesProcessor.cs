@@ -50,6 +50,26 @@ namespace DeviceExplorer
                 listOfDevices.Add(deviceEntity);
             }
 
+            await GetAllDevices();
+
+            return listOfDevices;
+        }
+
+        public async Task<List<DeviceEntity>> GetAllDevices()
+        {
+            listOfDevices.Clear();
+            IQuery query = registryManager.CreateQuery("SELECT * FROM devices");
+
+            while (query.HasMoreResults)
+            {
+                IEnumerable<Twin> batch = await query.GetNextAsTwinAsync();
+
+                foreach (Twin item in batch)
+                {
+                    listOfDevices.Add(MapTwinToDeviceEntity(item));
+                }
+            }
+
             return listOfDevices;
         }
 
@@ -59,6 +79,13 @@ namespace DeviceExplorer
             return MapDeviceToDeviceEntity(device);
         }
 
+        private DeviceEntity MapTwinToDeviceEntity(Twin twin)
+        {
+            return new DeviceEntity
+            {
+                Id = twin.DeviceId,
+            };
+        }
         private DeviceEntity MapDeviceToDeviceEntity(Device device)
         {
             return new DeviceEntity

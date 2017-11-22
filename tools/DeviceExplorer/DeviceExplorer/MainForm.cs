@@ -347,7 +347,7 @@ namespace DeviceExplorer
             // Note that this method is not guaranteed to return all the devices, merely 
             // an "approximation" of them.  It appears to generally top out at around 1000,
             // regardless of how high the max count is.
-            var devicesList = await devicesProcessor.GetDevices();
+            var devicesList = await devicesProcessor.GetAllDevices();
             devicesList.Sort();
             allDevices = new SortableBindingList<DeviceEntity>(devicesList);
 
