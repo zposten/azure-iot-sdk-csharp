@@ -12,22 +12,10 @@ namespace DeviceExplorer
     {
         private List<DeviceEntity> listOfDevices;
         private RegistryManager registryManager;
-        private String iotHubConnectionString;
+        private string iotHubConnectionString;
         private int maxCountOfDevices;
-        private String protocolGatewayHostName;
-
+        private string protocolGatewayHostName;
         private string hostName;
-        public string HostName
-        {
-            get
-            {
-                if (hostName == null)
-                {
-                    hostName = ExtractHostNameFromIotHubConnectionString(iotHubConnectionString);
-                }
-                return hostName;
-            }
-        }
 
         public DevicesProcessor(string iotHubConnenctionString, int devicesCount, string protocolGatewayName)
         {
@@ -36,9 +24,18 @@ namespace DeviceExplorer
             this.maxCountOfDevices = devicesCount;
             this.protocolGatewayHostName = protocolGatewayName;
             this.registryManager = RegistryManager.CreateFromConnectionString(iotHubConnectionString);
+
+            hostName = ExtractHostNameFromIotHubConnectionString(iotHubConnectionString);
         }
 
-        public async Task<List<DeviceEntity>> GetDevices()
+        /// <summary>
+        /// Receive an approximation of the devices in the IoT hub, up to the 
+        /// specified max.  This is not a definitive list, and seems to return
+        /// only up to around 1000 devices regardless of what you specify as 
+        /// the max.
+        /// </summary>
+        /// <returns></returns>
+        public async Task<List<DeviceEntity>> GetABunchOfDevices()
         {
             listOfDevices.Clear();
             IEnumerable<Device> devices = await registryManager.GetDevicesAsync(maxCountOfDevices);
@@ -50,27 +47,30 @@ namespace DeviceExplorer
                 listOfDevices.Add(deviceEntity);
             }
 
-            await GetAllDevices();
-
             return listOfDevices;
         }
 
-        public async Task<List<DeviceEntity>> GetAllDevices()
+        /// <summary>
+        /// Receive the ID of every device in the IoT hub.
+        /// </summary>
+        /// <remarks>
+        /// This method returns only the IDs of the devices because going out and 
+        /// fetching the rest of the data for every of tens of thousands of devices
+        /// takes too long.  Instead, this data should be fetched when the user needs
+        /// it or when they're not waiting.
+        /// </remarks>
+        public async Task<List<string>> GetAllDeviceIds()
         {
-            listOfDevices.Clear();
             IQuery query = registryManager.CreateQuery("SELECT * FROM devices");
+            var deviceIds = new List<string>();
 
             while (query.HasMoreResults)
             {
                 IEnumerable<Twin> batch = await query.GetNextAsTwinAsync();
-
-                foreach (Twin item in batch)
-                {
-                    listOfDevices.Add(MapTwinToDeviceEntity(item));
-                }
+                deviceIds.AddRange(batch.Select(item => item.DeviceId));
             }
 
-            return listOfDevices;
+            return deviceIds;
         }
 
         public async Task<DeviceEntity> GetDeviceById(string deviceId)
@@ -79,13 +79,6 @@ namespace DeviceExplorer
             return MapDeviceToDeviceEntity(device);
         }
 
-        private DeviceEntity MapTwinToDeviceEntity(Twin twin)
-        {
-            return new DeviceEntity
-            {
-                Id = twin.DeviceId,
-            };
-        }
         private DeviceEntity MapDeviceToDeviceEntity(Device device)
         {
             return new DeviceEntity
@@ -106,67 +99,60 @@ namespace DeviceExplorer
             };
         }
 
-        private String CreateDeviceConnectionString(Device device)
+        private string CreateDeviceConnectionString(Device device)
         {
-            StringBuilder deviceConnectionString = new StringBuilder();
+            var deviceConnectionString = new StringBuilder();
+            if (string.IsNullOrWhiteSpace(hostName)) return string.Empty;
 
-            if (!String.IsNullOrWhiteSpace(hostName))
+            deviceConnectionString.Append(hostName);
+            deviceConnectionString.AppendFormat("DeviceId={0}", device.Id);
+
+            if (device.Authentication != null)
             {
-                deviceConnectionString.Append(hostName);
-                deviceConnectionString.AppendFormat("DeviceId={0}", device.Id);
-
-                if (device.Authentication != null)
+                if (device.Authentication.SymmetricKey?.PrimaryKey != null)
                 {
-                    if ((device.Authentication.SymmetricKey != null) && (device.Authentication.SymmetricKey.PrimaryKey != null))
-                    {
-                        deviceConnectionString.AppendFormat(";SharedAccessKey={0}", device.Authentication.SymmetricKey.PrimaryKey);
-                    }
-                    else
-                    {
-                        deviceConnectionString.AppendFormat(";x509=true");
-                    }
+                    deviceConnectionString.AppendFormat(";SharedAccessKey={0}", device.Authentication.SymmetricKey.PrimaryKey);
                 }
-
-                if (this.protocolGatewayHostName.Length > 0)
+                else
                 {
-                    deviceConnectionString.AppendFormat(";GatewayHostName=ssl://{0}:8883", this.protocolGatewayHostName);
+                    deviceConnectionString.AppendFormat(";x509=true");
                 }
             }
-            
+
+            if (protocolGatewayHostName.Length > 0)
+            {
+                deviceConnectionString.AppendFormat(";GatewayHostName=ssl://{0}:8883", protocolGatewayHostName);
+            }
+
             return deviceConnectionString.ToString();
         }
 
 
         private static string ExtractHostNameFromIotHubConnectionString(string iotHubConnectionString)
         {
-            string hostName = String.Empty;
             string[] tokenArray = iotHubConnectionString.Split(';');
 
-            foreach (string t in tokenArray) {
-                string[] keyValueArray = t.Split('=');
-                if (keyValueArray[0] == "HostName")
-                {
-                    hostName = t + ';';
-                    return hostName;
-                }
-            }
-
-            return null;
+            return (
+                from t in tokenArray
+                let keyValueArray = t.Split('=')
+                where keyValueArray[0] == "HostName"
+                select t + ';'
+            ).FirstOrDefault();
         }
 
 
 
         // For testing without connecting to a live service
-        static public List<DeviceEntity> GetDevicesForTest()
+        public static List<DeviceEntity> GetDevicesForTest()
         {
-            List<DeviceEntity> deviceList;
-            deviceList = new List<DeviceEntity>();
-            deviceList.Add(new DeviceEntity() { Id = "TestDevice01", PrimaryKey = "TestPrimKey01", SecondaryKey = "TestSecKey01" });
-            deviceList.Add(new DeviceEntity() { Id = "TestDevice02", PrimaryKey = "TestPrimKey02", SecondaryKey = "TestSecKey02" });
-            deviceList.Add(new DeviceEntity() { Id = "TestDevice03", PrimaryKey = "TestPrimKey03", SecondaryKey = "TestSecKey03" });
-            deviceList.Add(new DeviceEntity() { Id = "TestDevice04", PrimaryKey = "TestPrimKey04", SecondaryKey = "TestSecKey04" });
-            deviceList.Add(new DeviceEntity() { Id = "TestDevice05", PrimaryKey = "TestPrimKey05", SecondaryKey = "TestSecKey05" });
-            return deviceList;
+            return new List<DeviceEntity>
+            {
+                new DeviceEntity { Id = "TestDevice01", PrimaryKey = "TestPrimKey01", SecondaryKey = "TestSecKey01" },
+                new DeviceEntity { Id = "TestDevice02", PrimaryKey = "TestPrimKey02", SecondaryKey = "TestSecKey02" },
+                new DeviceEntity { Id = "TestDevice03", PrimaryKey = "TestPrimKey03", SecondaryKey = "TestSecKey03" },
+                new DeviceEntity { Id = "TestDevice04", PrimaryKey = "TestPrimKey04", SecondaryKey = "TestSecKey04" },
+                new DeviceEntity { Id = "TestDevice05", PrimaryKey = "TestPrimKey05", SecondaryKey = "TestSecKey05" }
+            };
         }
     }
 }

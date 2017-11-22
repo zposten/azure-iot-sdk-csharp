@@ -54,7 +54,24 @@ namespace DeviceExplorer
         private static DataGridViewRow messageSysPropContentType = new DataGridViewRow();
         private static DataGridViewRow messageSysPropContentEncoding = new DataGridViewRow();
 
-        private SortableBindingList<DeviceEntity> allDevices;
+        /// <summary>The devices whose data we currently have, organized by their IDs</summary>
+        private Dictionary<string, DeviceEntity> allLoadedDevices;
+
+        private SortableBindingList<DeviceEntity> displayedDevices;
+        private IEnumerable<DeviceEntity> DisplayedDevices
+        {
+            get { return displayedDevices; }
+            set
+            {
+                displayedDevices = new SortableBindingList<DeviceEntity>(value);
+                devicesGridView.DataSource = displayedDevices;
+
+                updateDeviceCountLabel();
+            }
+        }
+
+        /// <summary>The IDs of every device in the IoT hub</summary>
+        private List<string> allDeviceIds;
         private DevicesProcessor devicesProcessor;
 
         private string deviceIDSearchPattern = String.Empty;
@@ -342,15 +359,24 @@ namespace DeviceExplorer
         #region ManagementTab
         private async Task updateDevicesGridView()
         {
-            devicesProcessor = new DevicesProcessor(activeIoTHubConnectionString, MAX_COUNT_OF_DEVICES, protocolGatewayHost.Text);
+            devicesProcessor = new DevicesProcessor(
+                activeIoTHubConnectionString, 
+                MAX_COUNT_OF_DEVICES, 
+                protocolGatewayHost.Text);
 
-            // Note that this method is not guaranteed to return all the devices, merely 
-            // an "approximation" of them.  It appears to generally top out at around 1000,
-            // regardless of how high the max count is.
-            var devicesList = await devicesProcessor.GetAllDevices();
-            devicesList.Sort();
-            allDevices = new SortableBindingList<DeviceEntity>(devicesList);
+            var bunchOfDevices = await devicesProcessor.GetABunchOfDevices();
+            var listOfdevices = bunchOfDevices.ToList();
+            listOfdevices.Sort();
 
+            allLoadedDevices = listOfdevices.ToDictionary(d => d.Id, d => d);
+            DisplayedDevices = listOfdevices;
+
+            selectAppropriateDevice();
+            buildCacheOfAllDeviceIds();
+        }
+
+        private void selectAppropriateDevice()
+        {
             string deviceCurrentlySelected = null;
 
             // Save the device ID currently selected on the grid.
@@ -362,18 +388,27 @@ namespace DeviceExplorer
             devicesGridView.ReadOnly = true;
             devicesGridView.SelectionMode = DataGridViewSelectionMode.FullRowSelect;
 
-            deviceCountLabel.Text = devicesList.Count > MAX_COUNT_OF_DEVICES
-                ? MAX_COUNT_OF_DEVICES + "+"
-                : devicesList.Count.ToString();
-
             // Re-select the device ID previously selected before the update.
             // This avoids the super-annoying need to scroll down every time the management grid gets updated.
             if (deviceCurrentlySelected != null)
             {
                 findAndSelectRowByDeviceID(deviceCurrentlySelected, true);
             }
+        }
 
-            FilterDevices();
+        private async void buildCacheOfAllDeviceIds()
+        {
+            allDeviceIds = await devicesProcessor.GetAllDeviceIds();
+            updateDeviceCountLabel();
+        }
+
+        private void updateDeviceCountLabel()
+        {
+            int totalNumberOfDevices = allDeviceIds != null && allDeviceIds.Any()
+                ? allDeviceIds.Count
+                : allLoadedDevices.Count;
+
+            deviceCountLabel.Text = $"{displayedDevices.Count} of {totalNumberOfDevices}";
         }
 
         private void createButton_Click(object sender, EventArgs e)
@@ -1105,10 +1140,10 @@ namespace DeviceExplorer
         #region Device Filtering
         private void filterDevicesTextBox_TextChanged(object sender, EventArgs e)
         {
-            FilterDevices();
+            displayDevicesMatchingFilter();
         }
 
-        private async Task FilterDevices() { await filterDevices(filterDevicesTextBox.Text); }
+        private async Task displayDevicesMatchingFilter() { await displayDevicesMatchingFilter(filterDevicesTextBox.Text); }
 
         /// <summary>
         /// Filter the devices present in the list down by the provided filter text.
@@ -1117,46 +1152,54 @@ namespace DeviceExplorer
         /// hub, even those that weren't returned by GetDevices(), and thus are not 
         /// in the list.
         /// </summary>
-        private async Task filterDevices(string filterText)
+        private async Task displayDevicesMatchingFilter(string filterText)
         {
-            DeviceEntity deviceFoundFromFilterText = await searchEntireIotHubByDeviceId(filterText);
-            if (deviceFoundFromFilterText != null)
+            if (filterText.Length == 0 || !IsValidRegex(filterText))
             {
-                devicesGridView.DataSource = 
-                    new SortableBindingList<DeviceEntity>(
-                        new[] { deviceFoundFromFilterText });
-                return;
-            };
-
-            if (!IsValidRegex(filterText))
-            {
-                devicesGridView.DataSource = allDevices;
+                DisplayedDevices = allLoadedDevices.Values;
                 return;
             }
 
             IEnumerable<DeviceEntity> filteredDevices = 
-                from device in allDevices
+                from device in allLoadedDevices.Values
                 where DeviceMatchesFilterText(device, filterText)
                 select device;
 
-            devicesGridView.DataSource = new SortableBindingList<DeviceEntity>(filteredDevices);
+            DisplayedDevices = filteredDevices;
+            searchForUnloadedMatchingDevices(filterText);
         }
 
         /// <summary>
-        /// This method goes through the entire IoT hub (not just the devices returned
-        /// by GetDevices() that are currently in the list) and searches for a device 
-        /// by its Id.
+        /// This method goes through the entire IoT hub and loads devices that
+        /// have not previously been loaded that match the supplied filter text
         /// </summary>
         /// <returns>The device if it exists, otherwise null</returns>
-        private async Task<DeviceEntity> searchEntireIotHubByDeviceId(string deviceId)
+        private async void searchForUnloadedMatchingDevices(string filterText)
         {
-            try
+            // Too many devies would be matched by such a short string to make
+            // this method complete in a reasonable amount of time
+            if (filterText.Length < 4) return;
+
+            if (allDeviceIds == null || !allDeviceIds.Any()) return;
+
+            IEnumerable<string> matchingIds = allDeviceIds.Where(id => StringMatchesFilterText(id, filterText));
+            if (!matchingIds.Any()) return;
+
+            var newlyLoadedDevices = new List<DeviceEntity>();
+            foreach (string id in matchingIds)
             {
-                return await devicesProcessor.GetDeviceById(deviceId);
+                var deviceIsLoaded = allLoadedDevices.ContainsKey(id);
+                if (deviceIsLoaded) continue;
+
+                System.Diagnostics.Debug.WriteLine($"---------LOADED {id}");
+                DeviceEntity device = await devicesProcessor.GetDeviceById(id);
+                allLoadedDevices[id] = device;
+                newlyLoadedDevices.Add(device);
             }
-            catch (Exception)
+
+            if (newlyLoadedDevices.Count > 0)
             {
-                return null;
+                DisplayedDevices = newlyLoadedDevices;
             }
         }
 
