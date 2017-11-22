@@ -1176,10 +1176,14 @@ namespace DeviceExplorer
         /// <returns>The device if it exists, otherwise null</returns>
         private async void searchForUnloadedMatchingDevices(string filterText)
         {
-            // Too many devies would be matched by such a short string to make
-            // this method complete in a reasonable amount of time
-            if (filterText.Length < 4) return;
+            // Loading devices that match a very short filter text could take a 
+            // very long time.  So if we are already displaying a large number of
+            // devices to the user, delay loading additional devices until the 
+            // filter is more specific
+            if (filterText.Length < 4 && displayedDevices.Count > 50) return;
 
+            // If the cache of device IDs has not been build yet, there's nothing 
+            // for us to search through.
             if (allDeviceIds == null || !allDeviceIds.Any()) return;
 
             IEnumerable<string> matchingIds = allDeviceIds.Where(id => StringMatchesFilterText(id, filterText));
