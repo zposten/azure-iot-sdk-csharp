@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using System.Threading;
@@ -57,15 +58,14 @@ namespace DeviceExplorer
         /// <summary>The devices whose data we currently have, organized by their IDs</summary>
         private Dictionary<string, DeviceEntity> allLoadedDevices;
 
-        private SortableBindingList<DeviceEntity> displayedDevices;
-        private IEnumerable<DeviceEntity> DisplayedDevices
+        private SortableBindingList<DeviceEntity> _devicesDisplayedInGrid;
+        private IEnumerable<DeviceEntity> DevicesDisplayedInManagementGrid
         {
-            get { return displayedDevices; }
+            get { return _devicesDisplayedInGrid; }
             set
             {
-                displayedDevices = new SortableBindingList<DeviceEntity>(value);
-                devicesGridView.DataSource = displayedDevices;
-
+                _devicesDisplayedInGrid = new SortableBindingList<DeviceEntity>(value);
+                devicesGridView.DataSource = _devicesDisplayedInGrid;
                 updateDeviceCountLabel();
             }
         }
@@ -172,31 +172,27 @@ namespace DeviceExplorer
             }
         }
 
-        private async Task updateDeviceIdsComboBoxes(bool runIfNullOrEmpty = true)
+        private void OnDevicesChanged()
         {
-            if (!String.IsNullOrEmpty(activeIoTHubConnectionString) || runIfNullOrEmpty)
-            {
-                List<string> deviceIdsForEvent = new List<string>();
-                List<string> deviceIdsForC2DMessage = new List<string>();
-                List<string> deviceIdsForDeviceMethod = new List<string>();
-                RegistryManager registryManager = RegistryManager.CreateFromConnectionString(activeIoTHubConnectionString);
+            updateDevicesGridView();
+            updateDeviceIdsComboBoxes();
+        }
 
-                var devices = await registryManager.GetDevicesAsync(MAX_COUNT_OF_DEVICES);
-                foreach (var device in devices)
-                {
-                    deviceIdsForEvent.Add(device.Id);
-                    deviceIdsForC2DMessage.Add(device.Id);
-                    deviceIdsForDeviceMethod.Add(device.Id);
-                }
-                await registryManager.CloseAsync();
-                deviceIDsComboBoxForEvent.DataSource = deviceIdsForEvent.OrderBy(c => c).ToList();
-                deviceIDsComboBoxForCloudToDeviceMessage.DataSource = deviceIdsForC2DMessage.OrderBy(c => c).ToList();
-                deviceIDsComboBoxForDeviceMethod.DataSource = deviceIdsForDeviceMethod.OrderBy(c => c).ToList();
+        private void updateDeviceIdsComboBoxes(bool runIfNullOrEmpty = true)
+        {
+            if (!runIfNullOrEmpty && (allLoadedDevices?.Keys == null || !allLoadedDevices.Keys.Any())) return;
 
-                deviceIDsComboBoxForEvent.SelectedIndex = deviceSelectedIndexForEvent;
-                deviceIDsComboBoxForCloudToDeviceMessage.SelectedIndex = deviceSelectedIndexForC2DMessage;
-                deviceIDsComboBoxForDeviceMethod.SelectedIndex = deviceSelectedIndexForDeviceMethod;
-            }
+            var deviceIdsForEvent        = new List<string>(allLoadedDevices.Keys);
+            var deviceIdsForC2DMessage   = new List<string>(allLoadedDevices.Keys);
+            var deviceIdsForDeviceMethod = new List<string>(allLoadedDevices.Keys);
+
+            deviceIDsComboBoxForEvent               .DataSource = deviceIdsForEvent       .OrderBy(c => c).ToList();
+            deviceIDsComboBoxForCloudToDeviceMessage.DataSource = deviceIdsForC2DMessage  .OrderBy(c => c).ToList();
+            deviceIDsComboBoxForDeviceMethod        .DataSource = deviceIdsForDeviceMethod.OrderBy(c => c).ToList();
+
+            deviceIDsComboBoxForEvent               .SelectedIndex = deviceSelectedIndexForEvent;
+            deviceIDsComboBoxForCloudToDeviceMessage.SelectedIndex = deviceSelectedIndexForC2DMessage;
+            deviceIDsComboBoxForDeviceMethod        .SelectedIndex = deviceSelectedIndexForDeviceMethod;
         }
         private void persistSettingsToAppConfig()
         {
@@ -357,22 +353,12 @@ namespace DeviceExplorer
         #endregion
 
         #region ManagementTab
-        private async Task updateDevicesGridView()
+        private void updateDevicesGridView()
         {
-            devicesProcessor = new DevicesProcessor(
-                activeIoTHubConnectionString, 
-                MAX_COUNT_OF_DEVICES, 
-                protocolGatewayHost.Text);
+            if (allLoadedDevices == null || !allLoadedDevices.Any()) return;
 
-            var bunchOfDevices = await devicesProcessor.GetABunchOfDevices();
-            var listOfdevices = bunchOfDevices.ToList();
-            listOfdevices.Sort();
-
-            allLoadedDevices = listOfdevices.ToDictionary(d => d.Id, d => d);
-            DisplayedDevices = listOfdevices;
-
+            DevicesDisplayedInManagementGrid = allLoadedDevices.Values;
             selectAppropriateDevice();
-            buildCacheOfAllDeviceIds();
         }
 
         private void selectAppropriateDevice()
@@ -408,7 +394,7 @@ namespace DeviceExplorer
                 ? allDeviceIds.Count
                 : allLoadedDevices.Count;
 
-            deviceCountLabel.Text = $"{displayedDevices.Count} of {totalNumberOfDevices}";
+            deviceCountLabel.Text = $"{_devicesDisplayedInGrid.Count} of {totalNumberOfDevices}";
         }
 
         private void createButton_Click(object sender, EventArgs e)
@@ -433,12 +419,12 @@ namespace DeviceExplorer
             UpdateListOfDevices();
         }
 
-        private async void UpdateListOfDevices()
+        private void UpdateListOfDevices()
         {
             try
             {
                 searchDevicesTextBox.Clear();
-                await updateDevicesGridView();
+                updateDevicesGridView();
                 devicesListed = true;
                 listDevicesButton.Text = "Refresh";
             }
@@ -462,7 +448,7 @@ namespace DeviceExplorer
                 DeviceUpdateForm updateForm = new DeviceUpdateForm(registryManager, MAX_COUNT_OF_DEVICES, selectedDeviceId);
                 updateForm.ShowDialog(this);
                 updateForm.Dispose();
-                await updateDevicesGridView();
+                updateDevicesGridView();
                 await registryManager.CloseAsync();
             }
             catch (Exception ex)
@@ -501,7 +487,7 @@ namespace DeviceExplorer
                         {
                             MessageBox.Show("Device(s) deleted successfully!", "Info", MessageBoxButtons.OK, MessageBoxIcon.Information);
                         }
-                        await updateDevicesGridView();
+                        updateDevicesGridView();
                         await registryManager.CloseAsync();
                     }
                 }
@@ -869,15 +855,7 @@ namespace DeviceExplorer
         {
             try
             {
-                if (e.TabPage == tabData || e.TabPage == tabMessagesToDevice || e.TabPage == tabDeviceMethod)
-                {
-                    await updateDeviceIdsComboBoxes(runIfNullOrEmpty: false);
-                }
-
-                if (e.TabPage == tabManagement)
-                {
-                    UpdateListOfDevices();
-                }
+                await fetchDevicesToDisplay();
             }
             catch (Exception ex)
             {
@@ -886,6 +864,25 @@ namespace DeviceExplorer
                     MessageBox.Show(ex.Message, "Error", MessageBoxButtons.OK, MessageBoxIcon.Error);
                 }
             }
+        }
+
+        private async Task fetchDevicesToDisplay(bool refresh = false)
+        {
+            if (!refresh && allLoadedDevices != null && allLoadedDevices.Any()) return;
+
+            devicesProcessor = new DevicesProcessor(
+                activeIoTHubConnectionString, 
+                MAX_COUNT_OF_DEVICES, 
+                protocolGatewayHost.Text);
+
+            var bunchOfDevices = await devicesProcessor.GetABunchOfDevices();
+            var listOfdevices = bunchOfDevices.ToList();
+            listOfdevices.Sort();
+
+            allLoadedDevices = listOfdevices.ToDictionary(d => d.Id, d => d);
+            OnDevicesChanged();
+
+            buildCacheOfAllDeviceIds();
         }
 
         private void dhConStringTextBox_KeyDown(object sender, KeyEventArgs e)
@@ -1056,7 +1053,7 @@ namespace DeviceExplorer
                 SASTokenForm sasForm = new SASTokenForm(registryManager, MAX_COUNT_OF_DEVICES, iotHubHostName);
                 sasForm.ShowDialog(this);
                 sasForm.Dispose();
-                await updateDevicesGridView();
+                updateDevicesGridView();
                 await registryManager.CloseAsync();
             }
             catch (Exception ex)
@@ -1156,7 +1153,7 @@ namespace DeviceExplorer
         {
             if (filterText.Length == 0 || !IsValidRegex(filterText))
             {
-                DisplayedDevices = allLoadedDevices.Values;
+                DevicesDisplayedInManagementGrid = allLoadedDevices.Values;
                 return;
             }
 
@@ -1165,7 +1162,7 @@ namespace DeviceExplorer
                 where DeviceMatchesFilterText(device, filterText)
                 select device;
 
-            DisplayedDevices = filteredDevices;
+            DevicesDisplayedInManagementGrid = filteredDevices;
             searchForUnloadedMatchingDevices(filterText);
         }
 
@@ -1180,7 +1177,7 @@ namespace DeviceExplorer
             // very long time.  So if we are already displaying a large number of
             // devices to the user, delay loading additional devices until the 
             // filter is more specific
-            if (filterText.Length < 4 && displayedDevices.Count > 50) return;
+            if (filterText.Length < 4 && _devicesDisplayedInGrid.Count > 50) return;
 
             // If the cache of device IDs has not been build yet, there's nothing 
             // for us to search through.
@@ -1195,7 +1192,7 @@ namespace DeviceExplorer
                 var deviceIsLoaded = allLoadedDevices.ContainsKey(id);
                 if (deviceIsLoaded) continue;
 
-                System.Diagnostics.Debug.WriteLine($"---------LOADED {id}");
+                Debug.WriteLine($"---------LOADED {id}");
                 DeviceEntity device = await devicesProcessor.GetDeviceById(id);
                 allLoadedDevices[id] = device;
                 newlyLoadedDevices.Add(device);
@@ -1203,7 +1200,8 @@ namespace DeviceExplorer
 
             if (newlyLoadedDevices.Count > 0)
             {
-                DisplayedDevices = newlyLoadedDevices;
+                DevicesDisplayedInManagementGrid = newlyLoadedDevices;
+                OnDevicesChanged();
             }
         }
 
